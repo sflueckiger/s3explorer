@@ -67,8 +67,8 @@ Workspace files and configuration are stored in `~/.s3explore/`:
 
 ```
 ~/.s3explore/
-├── workspaces.json          # List of known workspace paths
-└── default.encrypted.json   # Default workspace (if created)
+├── workspaces.json   # List of known workspace paths
+└── config.enc        # Default workspace (encrypted)
 ```
 
 ## Development
