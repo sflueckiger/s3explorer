@@ -1,3 +1,5 @@
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -7,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Lock, Plus, MoreVertical, Pencil, Trash2, Unlock } from "lucide-react";
+import { DraggableConnection } from "@/components/DraggableConnection";
 import type { ConfigFile, Connection } from "@/types";
 
 interface CredentialFileGroupProps {
@@ -20,6 +23,7 @@ interface CredentialFileGroupProps {
   onUnlock: (configPath: string) => void;
   onLock: (configPath: string) => void;
   onRemove: (configPath: string) => void;
+  onRename: (configPath: string) => void;
 }
 
 function truncatePath(path: string, maxLength: number = 30): string {
@@ -48,19 +52,44 @@ export function CredentialFileGroup({
   onUnlock,
   onLock,
   onRemove,
+  onRename,
 }: CredentialFileGroupProps) {
-  const { path, isUnlocked, connections } = configFile;
+  const { path, name, isUnlocked, connections } = configFile;
+
+  // Display name: use workspace name if set, otherwise derive from filename
+  const displayName = name || path.split("/").pop()?.replace(/\.enc$/, "") || path;
+
+  // Make the group header droppable for cross-group moves
+  const { setNodeRef, isOver } = useDroppable({
+    id: `group-${path}`,
+    data: {
+      type: "group",
+      configPath: path,
+      isUnlocked,
+    },
+  });
 
   return (
     <div className={!isFirst ? "border-t pt-2 mt-2" : ""}>
-      {/* File header */}
-      <div className="flex items-center justify-between px-2 py-1 group">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {!isUnlocked && (
-            <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          )}
+      {/* Group header - droppable target */}
+      <div
+        ref={setNodeRef}
+        className={`
+          flex items-center justify-between px-2 py-1 group rounded-md transition-colors
+          ${isOver ? "bg-accent/50 ring-2 ring-primary/30" : ""}
+        `}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {!isUnlocked && (
+              <Lock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+            )}
+            <span className="text-sm font-semibold truncate" title={displayName}>
+              {displayName}
+            </span>
+          </div>
           <span
-            className="text-xs text-muted-foreground italic truncate"
+            className="text-xs text-muted-foreground truncate block pl-5"
             title={path}
           >
             {truncatePath(path)}
@@ -93,10 +122,16 @@ export function CredentialFileGroup({
             />
             <DropdownMenuContent align="end">
               {isUnlocked ? (
-                <DropdownMenuItem onClick={() => onLock(path)}>
-                  <Lock className="h-4 w-4 mr-2" />
-                  Lock
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem onClick={() => onRename(path)}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onLock(path)}>
+                    <Lock className="h-4 w-4 mr-2" />
+                    Lock
+                  </DropdownMenuItem>
+                </>
               ) : (
                 <DropdownMenuItem onClick={() => onUnlock(path)}>
                   <Unlock className="h-4 w-4 mr-2" />
@@ -118,62 +153,30 @@ export function CredentialFileGroup({
 
       {/* Connections list or locked state */}
       {isUnlocked ? (
-        <div className="space-y-1 mt-1">
-          {connections.length === 0 ? (
-            <div className="text-xs text-muted-foreground text-center py-2 px-4">
-              No connections yet
-            </div>
-          ) : (
-            connections.map((conn) => (
-              <div
-                key={conn.id}
-                className={`
-                  group/conn flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer
-                  hover:bg-accent transition-colors ml-4
-                  ${activeConnectionId === conn.id ? "bg-accent" : ""}
-                `}
-              >
-                <button
-                  className="flex-1 text-left truncate"
-                  onClick={() => onSelectConnection(conn)}
-                >
-                  <div className="text-sm font-medium truncate">{conn.name}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {conn.bucket}
-                  </div>
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={(props) => (
-                      <Button
-                        {...props}
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 opacity-0 group-hover/conn:opacity-100 transition-opacity"
-                      >
-                        <MoreVertical className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  />
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => onEditConnection(conn)}>
-                      <Pencil className="h-4 w-4 mr-2" />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onClick={() => onDeleteConnection(conn)}
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+        <SortableContext
+          items={connections.map((c) => c.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-1 mt-1">
+            {connections.length === 0 ? (
+              <div className="text-xs text-muted-foreground text-center py-2 px-4">
+                No connections yet
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              connections.map((conn) => (
+                <DraggableConnection
+                  key={conn.id}
+                  connection={conn}
+                  configPath={path}
+                  isActive={activeConnectionId === conn.id}
+                  onSelect={() => onSelectConnection(conn)}
+                  onEdit={() => onEditConnection(conn)}
+                  onDelete={() => onDeleteConnection(conn)}
+                />
+              ))
+            )}
+          </div>
+        </SortableContext>
       ) : (
         <div className="flex items-center justify-center py-3 ml-4">
           <Button

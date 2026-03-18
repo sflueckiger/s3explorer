@@ -4,6 +4,7 @@ import { authRoutes } from "./routes/auth";
 import { connectionRoutes } from "./routes/connections";
 import { browseRoutes } from "./routes/browse";
 import { fileRoutes, downloadRoutes, fileMetaRoutes } from "./routes/files";
+import { workspacesRoutes } from "./routes/workspaces";
 
 const app = new Elysia()
   .use(cors({
@@ -12,6 +13,7 @@ const app = new Elysia()
   }))
   .get("/health", () => ({ status: "ok", timestamp: Date.now() }))
   .use(authRoutes)
+  .use(workspacesRoutes)
   .use(connectionRoutes)
   .use(browseRoutes)
   .use(fileRoutes)

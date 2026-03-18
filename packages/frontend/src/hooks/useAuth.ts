@@ -3,7 +3,6 @@ import { api } from "@/lib/api";
 import type { ConfigFile, Connection } from "@/types";
 
 interface AuthState {
-  // Multi-file state
   configFiles: ConfigFile[];
   defaultConfigPath: string;
   isFirstRun: boolean;
@@ -20,34 +19,44 @@ export function useAuth() {
     error: null,
   });
 
-  // Fetch status for all config files
+  // Fetch workspaces and their status
   const checkStatus = useCallback(async () => {
     try {
       setState((s) => ({ ...s, loading: true, error: null }));
-      const { data } = await (api.auth.status as any).get();
 
-      if (data) {
-        const configs = (data as any).configs || [];
-        const configFiles: ConfigFile[] = configs.map((c: any) => ({
-          path: c.configPath,
-          isUnlocked: c.unlocked,
-          exists: true,
-          connections: [],
-        }));
+      // Fetch workspaces from server
+      const { data: workspacesData } = await (api.workspaces as any).get();
+      const workspaces = workspacesData?.workspaces || [];
 
-        setState({
-          configFiles,
-          defaultConfigPath: (data as any).defaultConfigPath || "",
-          isFirstRun: (data as any).isFirstRun || false,
+      // Also fetch auth status for default path info
+      const { data: authData } = await (api.auth.status as any).get();
+
+      setState((s) => {
+        // Build config files from workspaces
+        const newConfigFiles: ConfigFile[] = workspaces.map((w: any) => {
+          const existing = s.configFiles.find((f) => f.path === w.path);
+          return {
+            path: w.path,
+            name: w.name,
+            isUnlocked: w.unlocked,
+            exists: w.exists,
+            connections: existing?.connections || [],
+          };
+        });
+
+        return {
+          configFiles: newConfigFiles,
+          defaultConfigPath: authData?.defaultConfigPath || "",
+          isFirstRun: workspaces.length === 0,
           loading: false,
           error: null,
-        });
-      }
+        };
+      });
     } catch (error) {
       setState((s) => ({
         ...s,
         loading: false,
-        error: "Failed to check auth status",
+        error: "Failed to check status",
       }));
     }
   }, []);
@@ -85,32 +94,33 @@ export function useAuth() {
 
         if (data && data.success) {
           const expandedPath = (data as any).configPath;
-          // Add or update the config file in state
-          // Also remove any duplicate entries with unexpanded paths (e.g., ~/...)
+
+          // Update local state
           setState((s) => {
-            const newFile: ConfigFile = {
-              path: expandedPath,
-              isUnlocked: true,
-              exists: true,
-              connections: [],
-            };
-
-            // Filter out any entries that match this path (exact or tilde version)
-            const filteredFiles = s.configFiles.filter((f) => {
-              if (f.path === expandedPath) return false;
-              // Check if it's the same path with tilde
-              if (f.path.startsWith("~") && expandedPath.endsWith(f.path.slice(1))) return false;
-              if (expandedPath.startsWith("~") && f.path.endsWith(expandedPath.slice(1))) return false;
-              return true;
-            });
-
-            return {
-              ...s,
-              configFiles: [...filteredFiles, newFile],
-              isFirstRun: false,
-              loading: false,
-              error: null,
-            };
+            const existingFile = s.configFiles.find((f) => f.path === expandedPath);
+            if (existingFile) {
+              return {
+                ...s,
+                configFiles: s.configFiles.map((f) =>
+                  f.path === expandedPath ? { ...f, isUnlocked: true } : f
+                ),
+                isFirstRun: false,
+                loading: false,
+                error: null,
+              };
+            } else {
+              // File was unlocked but not in workspaces list - shouldn't happen normally
+              return {
+                ...s,
+                configFiles: [
+                  ...s.configFiles,
+                  { path: expandedPath, isUnlocked: true, exists: true, connections: [] },
+                ],
+                isFirstRun: false,
+                loading: false,
+                error: null,
+              };
+            }
           });
           return { success: true, configPath: expandedPath };
         } else {
@@ -128,32 +138,36 @@ export function useAuth() {
   );
 
   // Setup a new config file
-  const setupFile = useCallback(async (password: string, configPath?: string) => {
+  const setupFile = useCallback(async (password: string, configPath?: string, name?: string) => {
     try {
       setState((s) => ({ ...s, loading: true, error: null }));
       const { data } = await (api.auth.setup as any).post({
         password,
         configPath,
+        name,
       });
 
       if (data && data.success) {
         const expandedPath = (data as any).configPath;
+        const groupName = (data as any).name || name;
+
+        // Add to workspaces on the server
+        await (api.workspaces as any).post({
+          name: groupName || "Workspace",
+          path: expandedPath,
+        });
+
         setState((s) => {
-          const newFile = {
+          const newFile: ConfigFile = {
             path: expandedPath,
+            name: groupName,
             isUnlocked: true,
             exists: true,
             connections: [],
           };
 
-          // Filter out any entries that match this path (exact or tilde version)
-          const filteredFiles = s.configFiles.filter((f) => {
-            if (f.path === expandedPath) return false;
-            // Check if it's the same path with tilde
-            if (f.path.startsWith("~") && expandedPath.endsWith(f.path.slice(1))) return false;
-            if (expandedPath.startsWith("~") && f.path.endsWith(expandedPath.slice(1))) return false;
-            return true;
-          });
+          // Filter out any duplicate entries
+          const filteredFiles = s.configFiles.filter((f) => f.path !== expandedPath);
 
           return {
             ...s,
@@ -246,27 +260,81 @@ export function useAuth() {
     []
   );
 
-  // Add a known path (without unlocking)
-  const addKnownPath = useCallback((path: string) => {
-    setState((s) => {
-      if (s.configFiles.some((f) => f.path === path)) return s;
-      return {
-        ...s,
-        configFiles: [
-          ...s.configFiles,
-          { path, isUnlocked: false, exists: true, connections: [] },
-        ],
-      };
-    });
+  // Add a workspace (server-side storage)
+  const addKnownPath = useCallback(async (path: string, name?: string) => {
+    try {
+      const { data } = await (api.workspaces as any).post({
+        name: name || "Workspace",
+        path,
+      });
+
+      if (data?.success) {
+        const addedPath = data.addedPath;
+        setState((s) => {
+          if (s.configFiles.some((f) => f.path === addedPath)) return s;
+          return {
+            ...s,
+            configFiles: [
+              ...s.configFiles,
+              { path: addedPath, name: name || "Workspace", isUnlocked: false, exists: true, connections: [] },
+            ],
+            isFirstRun: false,
+          };
+        });
+      }
+    } catch (error) {
+      console.error("Failed to add workspace:", error);
+    }
   }, []);
 
-  // Remove a known path
-  const removeKnownPath = useCallback((path: string) => {
-    setState((s) => ({
-      ...s,
-      configFiles: s.configFiles.filter((f) => f.path !== path),
-    }));
+  // Remove a workspace (server-side storage)
+  const removeKnownPath = useCallback(async (path: string) => {
+    try {
+      await (api.workspaces as any)[encodeURIComponent(path)].delete();
+      setState((s) => ({
+        ...s,
+        configFiles: s.configFiles.filter((f) => f.path !== path),
+      }));
+    } catch (error) {
+      console.error("Failed to remove workspace:", error);
+    }
   }, []);
+
+  // Rename a workspace (updates both encrypted config and workspaces.json)
+  const renameGroup = useCallback(
+    async (newName: string, configPath: string) => {
+      try {
+        // Update the encrypted config (if unlocked)
+        const { data } = await (api.auth.rename as any).post({
+          name: newName,
+          configPath,
+        });
+
+        // Also update the workspaces.json
+        await (api.workspaces as any)[encodeURIComponent(configPath)].name.put({
+          name: newName,
+        });
+
+        if (data && data.success) {
+          setState((s) => ({
+            ...s,
+            configFiles: s.configFiles.map((f) =>
+              f.path === configPath ? { ...f, name: newName } : f
+            ),
+          }));
+          return { success: true };
+        } else {
+          return {
+            success: false,
+            error: (data as any)?.message || "Failed to rename",
+          };
+        }
+      } catch (error) {
+        return { success: false, error: "Failed to rename" };
+      }
+    },
+    []
+  );
 
   // Computed properties
   const hasUnlockedFiles = state.configFiles.some((f) => f.isUnlocked);
@@ -286,6 +354,7 @@ export function useAuth() {
     setFileConnections,
     addKnownPath,
     removeKnownPath,
+    renameGroup,
     // Legacy compatibility
     unlocked: hasUnlockedFiles,
     unlock: unlockFile,

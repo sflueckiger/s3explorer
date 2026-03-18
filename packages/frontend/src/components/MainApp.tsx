@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { ConnectionSidebar } from "./ConnectionSidebar";
 import { BucketTabs } from "./BucketTabs";
 import { toast } from "sonner";
 import type { ConfigFile, Connection } from "@/types";
-import { useKnownPaths } from "@/hooks/useKnownPaths";
 
 interface OpenTab {
   connectionId: string;
@@ -18,10 +17,10 @@ interface MainAppProps {
   onUnlockFile: (password: string, configPath: string) => Promise<{ success: boolean; error?: string; configPath?: string }>;
   onSetupFile: (password: string, configPath: string) => Promise<{ success: boolean; error?: string; configPath?: string }>;
   onCheckFileStatus: (configPath: string) => Promise<{ exists: boolean; unlocked: boolean } | null>;
-  onChangePassword: (current: string, newPwd: string, configPath?: string) => Promise<{ success: boolean; error?: string }>;
   setFileConnections: (configPath: string, connections: Connection[]) => void;
-  addKnownPath: (path: string) => void;
-  removeKnownPath: (path: string) => void;
+  addKnownPath: (path: string, name?: string) => Promise<void>;
+  removeKnownPath: (path: string) => Promise<void>;
+  renameGroup: (newName: string, configPath: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function MainApp({
@@ -31,71 +30,55 @@ export function MainApp({
   onUnlockFile,
   onSetupFile,
   onCheckFileStatus,
-  onChangePassword,
   setFileConnections,
   addKnownPath,
   removeKnownPath,
+  renameGroup,
 }: MainAppProps) {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const { knownPaths, addKnownPath: addToStorage, removeKnownPath: removeFromStorage } = useKnownPaths();
+  const [createWorkspaceRequested, setCreateWorkspaceRequested] = useState(false);
 
-  // Fetch connections for all unlocked files
-  const fetchConnections = useCallback(async () => {
-    setLoading(true);
+  // Fetch connections for a specific file
+  const fetchConnectionsForFile = useCallback(async (file: ConfigFile) => {
+    if (!file.isUnlocked) return;
+
     try {
-      for (const file of configFiles) {
-        if (file.isUnlocked) {
-          const { data } = await (api.connections as any).get({
-            $query: { configPath: file.path },
-          });
-          if (data && data.success) {
-            const connections: Connection[] = ((data as any).connections || []).map((c: any) => ({
-              ...c,
-              configPath: file.path,
-            }));
-            setFileConnections(file.path, connections);
-          }
-        }
+      const { data } = await (api.connections as any).get({
+        query: { configPath: file.path },
+      });
+      if (data && data.success) {
+        const connections: Connection[] = ((data as any).connections || []).map((c: any) => ({
+          ...c,
+          configPath: file.path,
+        }));
+        setFileConnections(file.path, connections);
       }
     } catch (error) {
-      toast.error("Failed to load connections");
-    } finally {
+      console.error(`Failed to fetch connections for ${file.path}:`, error);
+    }
+  }, [setFileConnections]);
+
+  // Memoize the unlocked paths key to avoid re-fetching when connections change
+  const unlockedPathsKey = useMemo(
+    () => configFiles.filter((f) => f.isUnlocked).map((f) => f.path).join(","),
+    [configFiles]
+  );
+
+  // Fetch connections when unlocked files change
+  useEffect(() => {
+    const unlockedFiles = configFiles.filter((f) => f.isUnlocked);
+    if (unlockedFiles.length === 0) {
       setLoading(false);
+      return;
     }
-  }, [configFiles, setFileConnections]);
 
-  // Sync known paths from localStorage after initial load
-  useEffect(() => {
-    // Wait until initial loading is complete
-    if (loading) return;
-
-    for (const path of knownPaths) {
-      // Check if path already exists (comparing endings to handle ~/... vs /Users/...)
-      const matchingFile = configFiles.find((f) =>
-        f.path === path ||
-        f.path.endsWith(path.replace(/^~/, '')) ||
-        path.endsWith(f.path.replace(/^\/Users\/[^/]+/, ''))
-      );
-
-      if (matchingFile) {
-        // If the path in localStorage differs from the actual path, update localStorage
-        if (matchingFile.path !== path) {
-          removeFromStorage(path);
-          addToStorage(matchingFile.path);
-        }
-      } else {
-        // Path doesn't exist in configFiles yet, add it
-        addKnownPath(path);
-      }
-    }
-  }, [loading]); // Run after loading completes
-
-  // Fetch connections when config files change
-  useEffect(() => {
-    fetchConnections();
-  }, [configFiles.filter((f) => f.isUnlocked).map((f) => f.path).join(",")]);
+    setLoading(true);
+    Promise.all(unlockedFiles.map(fetchConnectionsForFile))
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlockedPathsKey]);
 
   const handleOpenConnection = useCallback(
     (connection: Connection) => {
@@ -127,7 +110,7 @@ export function MainApp({
       // Refetch connections for this file
       try {
         const { data } = await (api.connections as any).get({
-          $query: { configPath },
+          query: { configPath },
         });
         if (data && data.success) {
           const connections: Connection[] = ((data as any).connections || []).map((c: any) => ({
@@ -151,32 +134,14 @@ export function MainApp({
     [handleCloseTab, handleConnectionAdded]
   );
 
-  // Handle unlock file - also update localStorage with expanded path
-  const handleUnlockFile = useCallback(
-    async (password: string, configPath: string) => {
-      const result = await onUnlockFile(password, configPath);
-      if (result.success && result.configPath) {
-        // Remove old path from localStorage, add expanded path
-        removeFromStorage(configPath);
-        addToStorage(result.configPath);
-      }
-      return result;
+  // Handle connection moved between groups
+  const handleConnectionMoved = useCallback(
+    (sourceConfigPath: string, targetConfigPath: string) => {
+      // Refetch both source and target to get updated connection lists
+      handleConnectionAdded(sourceConfigPath);
+      handleConnectionAdded(targetConfigPath);
     },
-    [onUnlockFile, removeFromStorage, addToStorage]
-  );
-
-  // Handle setup file - also update localStorage with expanded path
-  const handleSetupFile = useCallback(
-    async (password: string, configPath: string) => {
-      const result = await onSetupFile(password, configPath);
-      if (result.success && result.configPath) {
-        // Remove old path from localStorage, add expanded path
-        removeFromStorage(configPath);
-        addToStorage(result.configPath);
-      }
-      return result;
-    },
-    [onSetupFile, removeFromStorage, addToStorage]
+    [handleConnectionAdded]
   );
 
   // Handle lock file - close all tabs for that file
@@ -194,17 +159,9 @@ export function MainApp({
     [configFiles, handleCloseTab, onLockFile]
   );
 
-  // Persist to localStorage when adding/removing
-  const handleAddKnownPath = useCallback(
-    (path: string) => {
-      addKnownPath(path);
-      addToStorage(path);
-    },
-    [addKnownPath, addToStorage]
-  );
-
+  // Handle remove workspace - close tabs first
   const handleRemoveKnownPath = useCallback(
-    (path: string) => {
+    async (path: string) => {
       // Close tabs for connections from this file
       const file = configFiles.find((f) => f.path === path);
       if (file) {
@@ -212,14 +169,10 @@ export function MainApp({
           handleCloseTab(conn.id);
         }
       }
-      removeKnownPath(path);
-      removeFromStorage(path);
+      await removeKnownPath(path);
     },
-    [configFiles, handleCloseTab, removeKnownPath, removeFromStorage]
+    [configFiles, handleCloseTab, removeKnownPath]
   );
-
-  // Get all connections from all config files
-  const allConnections = configFiles.flatMap((f) => f.connections);
 
   if (loading && configFiles.some((f) => f.isUnlocked && f.connections.length === 0)) {
     return (
@@ -234,32 +187,30 @@ export function MainApp({
       <ConnectionSidebar
         configFiles={configFiles}
         activeConnectionId={activeTabId}
+        openAddFileDialog={createWorkspaceRequested}
         onSelectConnection={handleOpenConnection}
         onConnectionAdded={handleConnectionAdded}
         onConnectionUpdated={handleConnectionAdded}
         onConnectionDeleted={handleConnectionDeleted}
+        onConnectionMoved={handleConnectionMoved}
         onLockAll={onLockAll}
         onLockFile={handleLockFile}
-        onUnlockFile={handleUnlockFile}
-        onSetupFile={handleSetupFile}
+        onUnlockFile={onUnlockFile}
+        onSetupFile={onSetupFile}
         onCheckFileStatus={onCheckFileStatus}
-        onAddKnownPath={handleAddKnownPath}
+        onAddKnownPath={addKnownPath}
         onRemoveKnownPath={handleRemoveKnownPath}
-        onChangePassword={onChangePassword}
+        onRenameGroup={renameGroup}
+        onAddFileDialogChange={setCreateWorkspaceRequested}
       />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 overflow-x-auto">
         <BucketTabs
           tabs={openTabs}
           activeTabId={activeTabId}
+          hasWorkspaces={configFiles.length > 0}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
-          onAddTab={() => {
-            if (allConnections.length === 0) {
-              toast.info("Add a connection first");
-            } else {
-              toast.info("Select a connection from the sidebar");
-            }
-          }}
+          onCreateWorkspace={() => setCreateWorkspaceRequested(true)}
         />
       </div>
     </div>

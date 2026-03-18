@@ -34,6 +34,48 @@ const CONTENT_TYPES: Record<string, string> = {
   js: "application/javascript",
 };
 
+// Reverse mapping: content type to extension (for files without extensions)
+const EXTENSION_FROM_CONTENT_TYPE: Record<string, string> = {
+  // Images
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  // Video
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+  "video/x-msvideo": "avi",
+  "video/x-matroska": "mkv",
+  // Audio
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "audio/ogg": "ogg",
+  "audio/flac": "flac",
+  "audio/aac": "aac",
+  // Text
+  "text/plain": "txt",
+  "application/json": "json",
+  "text/markdown": "md",
+  "text/yaml": "yaml",
+  "application/xml": "xml",
+  "text/xml": "xml",
+  "text/csv": "csv",
+  // Documents
+  "application/pdf": "pdf",
+  "text/html": "html",
+  "text/css": "css",
+  "application/javascript": "js",
+  "text/javascript": "js",
+  // Archives
+  "application/zip": "zip",
+  "application/gzip": "gz",
+  "application/x-tar": "tar",
+  "application/x-7z-compressed": "7z",
+  "application/x-rar-compressed": "rar",
+};
+
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 const TEXT_EXTENSIONS = ["txt", "json", "md", "yaml", "yml", "xml", "csv", "log"];
 
@@ -173,8 +215,15 @@ export const downloadRoutes = new Elysia({ prefix: "/download" })
         }
 
         const stat = await file.stat();
-        const filename = getFilename(path);
-        const contentType = getContentType(path);
+        let filename = getFilename(path);
+        // Use actual content type from S3, fall back to extension-based
+        const contentType = stat.type || getContentType(path);
+
+        // If filename has no extension, add one based on content type
+        const ext = getExtension(filename);
+        if (!ext && contentType && EXTENSION_FROM_CONTENT_TYPE[contentType]) {
+          filename = `${filename}.${EXTENSION_FROM_CONTENT_TYPE[contentType]}`;
+        }
 
         // Stream the file with download headers
         const stream = file.stream();

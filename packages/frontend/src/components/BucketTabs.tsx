@@ -1,4 +1,4 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { X, Plus } from "lucide-react";
@@ -20,29 +20,39 @@ interface OpenTab {
 interface BucketTabsProps {
   tabs: OpenTab[];
   activeTabId: string | null;
+  hasWorkspaces: boolean;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onAddTab: () => void;
+  onCreateWorkspace: () => void;
 }
 
 export function BucketTabs({
   tabs,
   activeTabId,
+  hasWorkspaces,
   onSelectTab,
   onCloseTab,
-  onAddTab,
+  onCreateWorkspace,
 }: BucketTabsProps) {
   if (tabs.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-muted/30">
         <div className="text-center">
-          <p className="text-muted-foreground mb-4">
-            Select a connection from the sidebar to start browsing
-          </p>
-          <Button variant="outline" onClick={onAddTab}>
-            <Plus className="h-4 w-4 mr-2" />
-            Open Connection
-          </Button>
+          {hasWorkspaces ? (
+            <p className="text-muted-foreground">
+              Select a connection from the sidebar to start browsing
+            </p>
+          ) : (
+            <>
+              <p className="text-muted-foreground mb-4">
+                No workspaces yet. Create one to get started.
+              </p>
+              <Button variant="outline" onClick={onCreateWorkspace}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create your first workspace
+              </Button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -87,28 +97,22 @@ export function BucketTabs({
                 </TabsTrigger>
               ))}
             </TabsList>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-10 px-3 rounded-none border-r"
-              onClick={onAddTab}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
           </div>
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
       </div>
 
-      {tabs.map((tab) => (
-        <TabsContent
-          key={tab.connectionId}
-          value={tab.connectionId}
-          className="flex-1 m-0 data-[state=inactive]:hidden"
-        >
-          <ColumnBrowser connectionId={tab.connectionId} connection={tab.connection} />
-        </TabsContent>
-      ))}
+      {/* Render all tabs unconditionally to preserve state, use CSS to show/hide */}
+      <div className="flex-1 relative">
+        {tabs.map((tab) => (
+          <div
+            key={tab.connectionId}
+            className={`absolute inset-0 ${tab.connectionId === activeTabId ? '' : 'hidden'}`}
+          >
+            <ColumnBrowser connectionId={tab.connectionId} connection={tab.connection} />
+          </div>
+        ))}
+      </div>
     </Tabs>
   );
 }

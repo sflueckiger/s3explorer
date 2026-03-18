@@ -50,19 +50,35 @@ function formatDate(dateStr: string): string {
   }
 }
 
+const PREVIEW_LINES = 5;
+
+function getFileUrl(connectionId: string, key: string): string {
+  return import.meta.env.DEV
+    ? `http://localhost:3333/file/${connectionId}/${key}`
+    : `/file/${connectionId}/${key}`;
+}
+
 export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
   const [metadata, setMetadata] = useState<FileMetadata | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [textExpanded, setTextExpanded] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     if (!file) {
       setMetadata(null);
       setTextContent(null);
       setError(null);
+      setTextExpanded(false);
+      setImageError(false);
       return;
     }
+
+    // Reset states when file changes
+    setTextExpanded(false);
+    setImageError(false);
 
     const loadMetadata = async () => {
       setLoading(true);
@@ -80,15 +96,13 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
           // If it's a text file, load the content
           if (meta.previewType === "text") {
             try {
-              const response = await fetch(
-                `http://localhost:3333/file/${connectionId}/${file.key}`
-              );
+              const response = await fetch(getFileUrl(connectionId, file.key));
               if (response.ok) {
                 const text = await response.text();
                 setTextContent(text);
               }
-            } catch (e) {
-              console.error("Failed to load text content:", e);
+            } catch {
+              // Text content loading failed silently
             }
           }
         } else {
@@ -106,10 +120,10 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
 
   const handleDownload = () => {
     if (!file) return;
-    window.open(
-      `http://localhost:3333/download/${connectionId}/${file.key}`,
-      "_blank"
-    );
+    const downloadUrl = import.meta.env.DEV
+      ? `http://localhost:3333/download/${connectionId}/${file.key}`
+      : `/download/${connectionId}/${file.key}`;
+    window.open(downloadUrl, "_blank");
   };
 
   if (!file) {
@@ -165,29 +179,36 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
           </div>
         ) : (
           <div className="p-4">
-            {isImage && (
-              <div className="mb-4">
+            {isImage && !imageError && (
+              <div className="-mx-4 mb-4">
                 <img
-                  src={`http://localhost:3333/file/${connectionId}/${file.key}`}
+                  src={getFileUrl(connectionId, file.key)}
                   alt={file.name}
-                  className="w-full rounded border bg-muted object-contain max-h-64"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
+                  className="w-full object-contain max-h-72"
+                  onError={() => setImageError(true)}
                 />
               </div>
             )}
 
-            {isText && textContent !== null && (
-              <div className="mb-4">
-                <pre className="text-xs bg-muted p-3 rounded overflow-x-auto max-h-64 overflow-y-auto">
-                  {ext === "json" ? (
-                    <code>{formatJson(textContent)}</code>
-                  ) : (
-                    <code>{textContent}</code>
-                  )}
-                </pre>
+            {isImage && imageError && (
+              <div className="mb-4 py-8 text-center text-muted-foreground text-sm">
+                Preview not available
               </div>
+            )}
+
+            {!isImage && !isText && (
+              <div className="mb-4 py-8 text-center text-muted-foreground text-sm">
+                Preview not available
+              </div>
+            )}
+
+            {isText && textContent !== null && (
+              <TextPreview
+                content={textContent}
+                isJson={ext === "json"}
+                expanded={textExpanded}
+                onToggle={() => setTextExpanded(!textExpanded)}
+              />
             )}
 
             {/* Metadata */}
@@ -211,17 +232,17 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
                 </div>
               )}
             </div>
+
+            {/* Download Button */}
+            <div className="mt-4 pt-4 border-t">
+              <Button className="w-full" onClick={handleDownload}>
+                <Download className="h-4 w-4 mr-2" />
+                Download
+              </Button>
+            </div>
           </div>
         )}
       </ScrollArea>
-
-      {/* Download Button */}
-      <div className="p-4 border-t">
-        <Button className="w-full" onClick={handleDownload}>
-          <Download className="h-4 w-4 mr-2" />
-          Download
-        </Button>
-      </div>
     </div>
   );
 }
@@ -232,4 +253,34 @@ function formatJson(text: string): string {
   } catch {
     return text;
   }
+}
+
+interface TextPreviewProps {
+  content: string;
+  isJson: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+function TextPreview({ content, isJson, expanded, onToggle }: TextPreviewProps) {
+  const formattedContent = isJson ? formatJson(content) : content;
+  const lines = formattedContent.split("\n");
+  const hasMore = lines.length > PREVIEW_LINES;
+  const displayContent = expanded ? formattedContent : lines.slice(0, PREVIEW_LINES).join("\n");
+
+  return (
+    <div className="mb-4">
+      <pre className={`text-xs bg-muted p-3 rounded overflow-x-auto ${expanded ? 'max-h-64 overflow-y-auto' : ''}`}>
+        <code>{displayContent}</code>
+      </pre>
+      {hasMore && (
+        <button
+          onClick={onToggle}
+          className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? "Show less" : `Show more (${lines.length - PREVIEW_LINES} more lines)`}
+        </button>
+      )}
+    </div>
+  );
 }

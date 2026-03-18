@@ -85,12 +85,13 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       try {
-        const config = createEmptyConfig();
+        const config = createEmptyConfig(body.name);
         await writeConfig(config, body.password, configPath);
         unlockConfig(configPath, config, body.password);
         return {
           success: true,
           configPath: expandedPath,
+          name: config.name,
           message: "Config created successfully",
         };
       } catch (error) {
@@ -105,6 +106,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       body: t.Object({
         password: t.String({ minLength: 8 }),
         configPath: t.Optional(t.String()),
+        name: t.Optional(t.String()),
       }),
     }
   )
@@ -210,17 +212,24 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       configPath: string;
       unlocked: boolean;
       connectionCount?: number;
+      name?: string;
     }> = [];
 
     for (const path of unlockedPaths) {
       const session = getSessionInfo(path);
       if (session) {
-        const config = await readConfig(session.password, path);
-        configs.push({
-          configPath: path,
-          unlocked: true,
-          connectionCount: config.connections.length,
-        });
+        try {
+          const config = await readConfig(session.password, path);
+          configs.push({
+            configPath: path,
+            unlocked: true,
+            connectionCount: config.connections.length,
+            name: config.name,
+          });
+        } catch {
+          // File was deleted or is no longer readable - remove from session
+          lockConfig(path);
+        }
       }
     }
 
@@ -230,6 +239,45 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       configs,
     };
   })
+  .post(
+    "/rename",
+    async ({ body }) => {
+      const configPath = body.configPath || DEFAULT_PATH;
+      const session = getSessionInfo(configPath);
+      if (!session) {
+        return {
+          success: false,
+          error: "NOT_UNLOCKED",
+          message: "Must be unlocked to rename",
+          configPath: expandPath(configPath),
+        };
+      }
+
+      try {
+        const config = await readConfig(session.password, session.configPath);
+        config.name = body.name;
+        await writeConfig(config, session.password, session.configPath);
+        unlockConfig(session.configPath, config, session.password);
+        return {
+          success: true,
+          name: config.name,
+          configPath: session.configPath,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: "RENAME_FAILED",
+          message: error instanceof Error ? error.message : "Failed to rename",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        name: t.String({ minLength: 1 }),
+        configPath: t.Optional(t.String()),
+      }),
+    }
+  )
   .get(
     "/file-status",
     async ({ query }) => {
@@ -238,11 +286,26 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const exists = await configExists(configPath);
       const unlocked = isUnlocked(configPath);
 
+      // Try to get the workspace name if unlocked
+      let name: string | undefined;
+      if (unlocked) {
+        const session = getSessionInfo(configPath);
+        if (session) {
+          try {
+            const config = await readConfig(session.password, session.configPath);
+            name = config.name;
+          } catch {
+            // Ignore read errors
+          }
+        }
+      }
+
       return {
         configPath: expandedPath,
         exists,
         unlocked,
         isFirstRun: !exists,
+        name,
       };
     }
   );

@@ -20,7 +20,7 @@ The system SHALL display active bucket connections as tabs, allowing users to sw
 - **THEN** the system focuses the sidebar for connection selection
 
 ### Requirement: Column-based file browser
-The system SHALL display bucket contents in a column-based layout similar to Mac Finder's column view.
+The system SHALL display bucket contents in a column-based layout similar to Mac Finder's column view, with automatic compaction for deep navigation.
 
 #### Scenario: Initial column
 - **WHEN** user opens a bucket tab
@@ -35,8 +35,12 @@ The system SHALL display bucket contents in a column-based layout similar to Mac
 - **THEN** columns to the right of the selection are removed and replaced with the new selection's contents
 
 #### Scenario: Horizontal scroll
-- **WHEN** navigation depth exceeds visible columns
+- **WHEN** navigation depth exceeds visible columns AND columns are not compacted
 - **THEN** the column container scrolls horizontally to show the latest column
+
+#### Scenario: Deep navigation compaction
+- **WHEN** navigation depth exceeds the compaction threshold
+- **THEN** middle columns are compacted to keep first and last columns visible without horizontal scrolling
 
 ### Requirement: Folder synthesis from prefixes
 The system SHALL synthesize a folder structure from S3 object key prefixes.
@@ -103,3 +107,25 @@ The system SHALL indicate the connection status for each open bucket tab.
 #### Scenario: Error state
 - **WHEN** bucket access fails (permissions, network)
 - **THEN** an error indicator is shown with the ability to view details
+
+### Requirement: Preview panel positioning
+The preview panel SHALL remain fixed to the right edge of the browser view at all times, regardless of column scroll position.
+
+#### Scenario: Scrolling columns does not move preview
+- **WHEN** user scrolls the columns area horizontally
+- **THEN** the preview panel SHALL remain stationary at the right edge
+
+### Requirement: Column horizontal scrolling
+The columns area SHALL scroll horizontally to accommodate deep folder navigation, while keeping the last column visible.
+
+#### Scenario: Navigate to deep folder
+- **WHEN** user navigates into a folder causing more columns than fit the view
+- **THEN** columns SHALL scroll horizontally to show the newest column
+- **AND** preview panel SHALL remain fixed right
+
+### Requirement: Empty preview state
+When no file is selected, the preview panel SHALL display a clear "No preview available" message.
+
+#### Scenario: No file selected
+- **WHEN** no file is currently selected (only folders navigated)
+- **THEN** preview panel SHALL show "Select a file to preview"

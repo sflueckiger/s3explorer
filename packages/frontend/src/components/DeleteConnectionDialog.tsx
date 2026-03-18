@@ -33,7 +33,7 @@ export function DeleteConnectionDialog({
     setLoading(true);
     try {
       const { data } = await (api.connections({ id: connection.id }) as any).delete({
-        $query: { configPath: connection.configPath },
+        query: { configPath: connection.configPath },
       });
 
       if (data && data.success) {

@@ -23,6 +23,7 @@ function App() {
           defaultConfigPath={auth.defaultConfigPath}
           onUnlock={auth.unlock}
           onSetup={auth.setup}
+          onAddWorkspace={auth.addKnownPath}
         />
         <Toaster />
       </>
@@ -38,10 +39,10 @@ function App() {
         onUnlockFile={auth.unlockFile}
         onSetupFile={auth.setupFile}
         onCheckFileStatus={auth.checkFileStatus}
-        onChangePassword={auth.changePassword}
         setFileConnections={auth.setFileConnections}
         addKnownPath={auth.addKnownPath}
         removeKnownPath={auth.removeKnownPath}
+        renameGroup={auth.renameGroup}
       />
       <Toaster />
     </>

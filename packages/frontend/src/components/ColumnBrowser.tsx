@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
-import { Folder, File, FileText, FileImage, Loader2, AlertCircle } from "lucide-react";
+import { Folder, File, FileText, FileImage, Loader2, AlertCircle, MoreHorizontal } from "lucide-react";
 import { PreviewPanel } from "./PreviewPanel";
 import { cn } from "@/lib/utils";
 
@@ -71,10 +71,69 @@ function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
+const COMPACTION_THRESHOLD = 4;
+
+interface CompactIndicatorProps {
+  hiddenCount: number;
+  isExpanded: boolean;
+  onClick: () => void;
+}
+
+function CompactIndicator({ hiddenCount, isExpanded, onClick }: CompactIndicatorProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-12 h-full border-r flex flex-col items-center justify-center flex-shrink-0",
+        "bg-muted/50 hover:bg-muted transition-colors cursor-pointer",
+        isExpanded && "bg-muted"
+      )}
+      title={`${hiddenCount} hidden column${hiddenCount > 1 ? "s" : ""} - click to ${isExpanded ? "collapse" : "expand"}`}
+    >
+      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+      <span className="text-xs text-muted-foreground mt-1">{hiddenCount}</span>
+    </button>
+  );
+}
+
+function useColumnCompaction<T>(columns: T[]) {
+  return useMemo(() => {
+    const shouldCompact = columns.length > COMPACTION_THRESHOLD;
+
+    if (!shouldCompact) {
+      return {
+        shouldCompact: false,
+        visibleColumns: columns,
+        hiddenColumns: [] as T[],
+        firstColumn: columns[0] as T | undefined,
+        lastTwoColumns: columns.slice(-2),
+        hiddenCount: 0,
+      };
+    }
+
+    const firstColumn = columns[0];
+    const hiddenColumns = columns.slice(1, -2);
+    const lastTwoColumns = columns.slice(-2);
+
+    return {
+      shouldCompact: true,
+      visibleColumns: [firstColumn, ...lastTwoColumns],
+      hiddenColumns,
+      firstColumn,
+      lastTwoColumns,
+      hiddenCount: hiddenColumns.length,
+    };
+  }, [columns]);
+}
+
 export function ColumnBrowser({ connectionId, connection }: ColumnBrowserProps) {
   const [columns, setColumns] = useState<Column[]>([]);
   const [selectedFile, setSelectedFile] = useState<S3Object | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const expandedRef = useRef<HTMLDivElement>(null);
+
+  const compaction = useColumnCompaction(columns);
 
   const loadColumn = useCallback(
     async (prefix: string, columnIndex: number) => {
@@ -137,11 +196,35 @@ export function ColumnBrowser({ connectionId, connection }: ColumnBrowserProps) 
     loadColumn("", 0);
   }, [loadColumn]);
 
-  // Scroll to end when columns change
+  // Scroll to end when columns change to keep last column visible
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+        }
+      });
     }
+  }, [columns.length]);
+
+  // Collapse expanded view on outside click
+  useEffect(() => {
+    if (!isExpanded) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (expandedRef.current && !expandedRef.current.contains(event.target as Node)) {
+        setIsExpanded(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isExpanded]);
+
+  // Collapse expanded view when columns change (navigation occurred)
+  useEffect(() => {
+    setIsExpanded(false);
   }, [columns.length]);
 
   const handleSelectFolder = useCallback(
@@ -224,76 +307,47 @@ export function ColumnBrowser({ connectionId, connection }: ColumnBrowserProps) 
 
       {/* Column browser + Preview */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Columns */}
-        <ScrollArea className="flex-1" ref={scrollRef}>
-          <div className="flex h-full min-w-max">
-            {columns.map((column, columnIndex) => (
-              <div
-                key={column.prefix + columnIndex}
-                className="w-64 h-full border-r flex flex-col flex-shrink-0"
-              >
-                {column.loading ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : column.error ? (
-                  <div className="flex-1 flex items-center justify-center p-4 text-center">
-                    <div className="text-destructive">
-                      <AlertCircle className="h-6 w-6 mx-auto mb-2" />
-                      <p className="text-sm">{column.error}</p>
-                    </div>
-                  </div>
-                ) : column.data ? (
-                  <ScrollArea className="flex-1">
-                    <div className="p-1">
-                      {/* Folders */}
-                      {column.data.folders.map((folder) => (
-                        <button
-                          key={folder.prefix}
-                          className={cn(
-                            "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-accent",
-                            column.selectedItem === folder.prefix && "bg-accent"
-                          )}
-                          onClick={() => handleSelectFolder(columnIndex, folder)}
-                        >
-                          <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                          <span className="truncate text-sm">{folder.name}</span>
-                        </button>
-                      ))}
-                      {/* Files */}
-                      {column.data.files.map((file) => (
-                        <button
-                          key={file.key}
-                          className={cn(
-                            "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-accent group",
-                            column.selectedItem === file.key && "bg-accent"
-                          )}
-                          onClick={() => handleSelectFile(columnIndex, file)}
-                        >
-                          <div className="flex-shrink-0">{getFileIcon(file.name)}</div>
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate text-sm">{file.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatFileSize(file.size)}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                      {column.data.folders.length === 0 && column.data.files.length === 0 && (
-                        <div className="text-center py-8 text-sm text-muted-foreground">
-                          Empty folder
-                        </div>
-                      )}
-                    </div>
-                  </ScrollArea>
-                ) : null}
-              </div>
-            ))}
-          </div>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
+        {/* Columns - scrollable area */}
+        <div className="flex-1 overflow-x-auto" ref={scrollRef}>
+          <div className="flex h-full">
+            {compaction.shouldCompact ? (
+              <>
+                {/* First column (root) */}
+                {compaction.firstColumn && renderColumn(compaction.firstColumn, 0)}
 
-        {/* Preview Panel */}
+                {/* Compact indicator for hidden columns */}
+                <CompactIndicator
+                  hiddenCount={compaction.hiddenCount}
+                  isExpanded={isExpanded}
+                  onClick={() => setIsExpanded(!isExpanded)}
+                />
+
+                {/* Expanded overlay for hidden columns */}
+                {isExpanded && (
+                  <div
+                    ref={expandedRef}
+                    className="flex h-full bg-background shadow-lg border-r"
+                  >
+                    {compaction.hiddenColumns.map((column, idx) => {
+                      const originalIndex = idx + 1;
+                      return renderColumn(column, originalIndex);
+                    })}
+                  </div>
+                )}
+
+                {/* Last two columns */}
+                {compaction.lastTwoColumns.map((column, idx) => {
+                  const originalIndex = columns.length - 2 + idx;
+                  return renderColumn(column, originalIndex);
+                })}
+              </>
+            ) : (
+              columns.map((column, columnIndex) => renderColumn(column, columnIndex))
+            )}
+          </div>
+        </div>
+
+        {/* Preview Panel - fixed right, outside scroll area */}
         <PreviewPanel
           connectionId={connectionId}
           file={selectedFile}
@@ -301,4 +355,74 @@ export function ColumnBrowser({ connectionId, connection }: ColumnBrowserProps) 
       </div>
     </div>
   );
+
+  function renderColumn(column: Column, columnIndex: number) {
+    // Don't render empty columns (no data, not loading, no error)
+    if (!column.loading && !column.error && !column.data) {
+      return null;
+    }
+
+    return (
+      <div
+        key={column.prefix + columnIndex}
+        className="w-64 h-full border-r flex flex-col flex-shrink-0"
+      >
+        {column.loading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : column.error ? (
+          <div className="flex-1 flex items-center justify-center p-4 text-center">
+            <div className="text-destructive">
+              <AlertCircle className="h-6 w-6 mx-auto mb-2" />
+              <p className="text-sm">{column.error}</p>
+            </div>
+          </div>
+        ) : column.data ? (
+          <ScrollArea className="flex-1">
+            <div className="p-1">
+              {/* Folders */}
+              {column.data.folders.map((folder) => (
+                <button
+                  key={folder.prefix}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-accent",
+                    column.selectedItem === folder.prefix && "bg-accent"
+                  )}
+                  onClick={() => handleSelectFolder(columnIndex, folder)}
+                >
+                  <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                  <span className="truncate text-sm">{folder.name}</span>
+                </button>
+              ))}
+              {/* Files */}
+              {column.data.files.map((file) => (
+                <button
+                  key={file.key}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-accent group",
+                    column.selectedItem === file.key && "bg-accent"
+                  )}
+                  onClick={() => handleSelectFile(columnIndex, file)}
+                >
+                  <div className="flex-shrink-0">{getFileIcon(file.name)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm">{file.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatFileSize(file.size)}
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {column.data.folders.length === 0 && column.data.files.length === 0 && (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  Empty folder
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        ) : null}
+      </div>
+    );
+  }
 }

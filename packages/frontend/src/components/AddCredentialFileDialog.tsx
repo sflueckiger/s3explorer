@@ -15,10 +15,12 @@ import { AlertCircle, Loader2 } from "lucide-react";
 interface AddCredentialFileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (path: string) => Promise<{ exists: boolean; unlocked: boolean; configPath: string }>;
+  onAdd: (path: string, name: string) => Promise<{ exists: boolean; unlocked: boolean; configPath: string }>;
   onUnlock: (path: string) => void;
-  onSetup: (path: string) => void;
+  onSetup: (path: string, name: string) => void;
 }
+
+const DEFAULT_PATH = "~/.s3explore/config.enc";
 
 export function AddCredentialFileDialog({
   open,
@@ -27,19 +29,25 @@ export function AddCredentialFileDialog({
   onUnlock,
   onSetup,
 }: AddCredentialFileDialogProps) {
-  const [path, setPath] = useState("");
+  const [name, setName] = useState("");
+  const [path, setPath] = useState(DEFAULT_PATH);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const resetForm = () => {
-    setPath("");
+    setName("");
+    setPath(DEFAULT_PATH);
     setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      setError("Workspace name is required");
+      return;
+    }
     if (!path.trim()) {
-      setError("Path is required");
+      setError("File path is required");
       return;
     }
 
@@ -47,7 +55,8 @@ export function AddCredentialFileDialog({
     setError(null);
 
     try {
-      const status = await onAdd(path.trim());
+      const workspaceName = name.trim();
+      const status = await onAdd(path.trim(), workspaceName);
       resetForm();
       onOpenChange(false);
 
@@ -58,12 +67,12 @@ export function AddCredentialFileDialog({
         // File exists but locked - prompt unlock
         onUnlock(expandedPath);
       } else if (!status.exists) {
-        // File doesn't exist - prompt setup
-        onSetup(expandedPath);
+        // File doesn't exist - prompt setup with name
+        onSetup(expandedPath, workspaceName);
       }
       // If already unlocked, just close
     } catch (err) {
-      setError("Failed to add credential file");
+      setError("Failed to add workspace");
     } finally {
       setLoading(false);
     }
@@ -80,25 +89,34 @@ export function AddCredentialFileDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Add Credential File</DialogTitle>
+            <DialogTitle>Add Workspace</DialogTitle>
             <DialogDescription>
-              Enter the path to a credential file. If it doesn't exist, you'll
-              be prompted to create it.
+              Please indicate the location of your connection file for this
+              workspace. If it does not exist, it will be created automatically.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="workspaceName">Workspace Name</Label>
+              <Input
+                id="workspaceName"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., Work, Personal"
+                autoFocus
+              />
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="path">File Path</Label>
               <Input
                 id="path"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                placeholder="~/.s3explore/config.enc"
-                autoFocus
               />
               <p className="text-xs text-muted-foreground">
-                Use ~ for home directory. Example: ~/.s3explore/personal.enc
+                Use ~ for home directory. Example: ~/.s3explore/work.enc
               </p>
             </div>
 

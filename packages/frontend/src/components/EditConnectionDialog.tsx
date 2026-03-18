@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { ColorPicker } from "@/components/ColorPicker";
 
 import type { Connection } from "@/types";
 
@@ -34,6 +35,7 @@ export function EditConnectionDialog({
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [sessionToken, setSessionToken] = useState("");
+  const [color, setColor] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +56,7 @@ export function EditConnectionDialog({
             setAccessKeyId(conn.accessKeyId || "");
             setSecretAccessKey(conn.secretAccessKey || "");
             setSessionToken(conn.sessionToken || "");
+            setColor(conn.color || undefined);
           }
         })
         .finally(() => setLoadingDetails(false));
@@ -76,6 +79,7 @@ export function EditConnectionDialog({
         accessKeyId,
         secretAccessKey,
         sessionToken: sessionToken || undefined,
+        color: color || undefined,
         configPath: connection.configPath,
       });
 
@@ -184,6 +188,11 @@ export function EditConnectionDialog({
                   onChange={(e) => setSessionToken(e.target.value)}
                   placeholder="For temporary credentials"
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Color (optional)</Label>
+                <ColorPicker value={color} onChange={setColor} />
               </div>
 
               {error && (

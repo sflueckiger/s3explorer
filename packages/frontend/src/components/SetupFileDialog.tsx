@@ -15,13 +15,15 @@ import { AlertCircle, Loader2 } from "lucide-react";
 interface SetupFileDialogProps {
   open: boolean;
   configPath: string | null;
+  workspaceName: string;
   onOpenChange: (open: boolean) => void;
-  onSetup: (password: string, configPath: string) => Promise<{ success: boolean; error?: string }>;
+  onSetup: (password: string, configPath: string, name?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function SetupFileDialog({
   open,
   configPath,
+  workspaceName,
   onOpenChange,
   onSetup,
 }: SetupFileDialogProps) {
@@ -54,15 +56,15 @@ export function SetupFileDialog({
     setError(null);
 
     try {
-      const result = await onSetup(password, configPath);
+      const result = await onSetup(password, configPath, workspaceName || undefined);
       if (result.success) {
         resetForm();
         onOpenChange(false);
       } else {
-        setError(result.error || "Failed to create credential file");
+        setError(result.error || "Failed to create workspace");
       }
     } catch (err) {
-      setError("Failed to create credential file");
+      setError("Failed to create workspace");
     } finally {
       setLoading(false);
     }
@@ -79,15 +81,18 @@ export function SetupFileDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Create New Credential File</DialogTitle>
+            <DialogTitle>Set Workspace Password</DialogTitle>
             <DialogDescription>
-              This file doesn't exist yet. Set a password to create it.
+              This file doesn't exist yet. Set a password to protect your workspace.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            <div className="text-sm font-mono bg-muted p-2 rounded break-all">
-              {configPath}
+            <div className="bg-muted p-3 rounded space-y-1">
+              <div className="text-sm font-medium">{workspaceName}</div>
+              <div className="text-xs text-muted-foreground font-mono break-all">
+                {configPath}
+              </div>
             </div>
 
             <div className="grid gap-2">

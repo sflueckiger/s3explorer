@@ -14,9 +14,11 @@ export interface Connection {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken?: string;
+  color?: string;
 }
 
 export interface Config {
+  name?: string;
   connections: Connection[];
 }
 
@@ -81,8 +83,8 @@ export async function writeConfig(
   await writeFile(expandedPath, JSON.stringify(encrypted, null, 2), "utf8");
 }
 
-export function createEmptyConfig(): Config {
-  return { connections: [] };
+export function createEmptyConfig(name?: string): Config {
+  return { name, connections: [] };
 }
 
 export function generateConnectionId(): string {
