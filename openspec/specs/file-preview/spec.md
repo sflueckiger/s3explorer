@@ -11,6 +11,10 @@ The system SHALL display a preview panel on the right side of the column browser
 - **WHEN** no file is selected (only folders selected or nothing)
 - **THEN** the preview panel shows a placeholder or is hidden
 
+#### Scenario: Video file selected
+- **WHEN** user selects a video file (mp4, webm)
+- **THEN** the preview panel displays a video player
+
 ### Requirement: Image preview
 The system SHALL display image previews for supported image formats.
 

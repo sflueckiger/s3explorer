@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Download, FileText, Image, File, Loader2, AlertCircle } from "lucide-react";
+import { Download, FileText, Image, File, Loader2, AlertCircle, Video } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface S3Object {
@@ -23,11 +23,12 @@ interface FileMetadata {
   lastModified: string;
   contentType: string;
   isPreviewable: boolean;
-  previewType: "image" | "text" | null;
+  previewType: "image" | "text" | "video" | null;
 }
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 const TEXT_EXTENSIONS = ["txt", "json", "md", "yaml", "yml", "xml", "csv", "log"];
+const VIDEO_EXTENSIONS = ["mp4", "webm"];
 
 function getExtension(name: string): string {
   const parts = name.split(".");
@@ -65,6 +66,7 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [textExpanded, setTextExpanded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!file) {
@@ -79,6 +81,7 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
     // Reset states when file changes
     setTextExpanded(false);
     setImageError(false);
+    setVideoError(null);
 
     const loadMetadata = async () => {
       setLoading(true);
@@ -138,8 +141,10 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
   }
 
   const ext = getExtension(file.name);
-  const isImage = IMAGE_EXTENSIONS.includes(ext);
-  const isText = TEXT_EXTENSIONS.includes(ext);
+  // Use metadata previewType (based on content-type) if available, fall back to extension
+  const isImage = metadata?.previewType === "image" || (!metadata && IMAGE_EXTENSIONS.includes(ext));
+  const isText = metadata?.previewType === "text" || (!metadata && TEXT_EXTENSIONS.includes(ext));
+  const isVideo = metadata?.previewType === "video" || (!metadata && VIDEO_EXTENSIONS.includes(ext));
 
   return (
     <div className="w-80 border-l bg-background flex flex-col">
@@ -149,6 +154,8 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
           <div className="w-10 h-10 rounded bg-muted flex items-center justify-center flex-shrink-0">
             {isImage ? (
               <Image className="h-5 w-5 text-blue-500" />
+            ) : isVideo ? (
+              <Video className="h-5 w-5 text-purple-500" />
             ) : isText ? (
               <FileText className="h-5 w-5 text-amber-500" />
             ) : (
@@ -196,7 +203,42 @@ export function PreviewPanel({ connectionId, file }: PreviewPanelProps) {
               </div>
             )}
 
-            {!isImage && !isText && (
+            {isVideo && !videoError && (
+              <div className="-mx-4 mb-4">
+                <video
+                  key={file.key}
+                  src={getFileUrl(connectionId, file.key)}
+                  controls
+                  preload="metadata"
+                  className="w-full max-h-72 object-contain bg-black"
+                  onError={(e) => {
+                    const video = e.currentTarget;
+                    const error = video.error;
+                    if (error) {
+                      const messages: Record<number, string> = {
+                        1: "Video loading was aborted",
+                        2: "Network error while loading video",
+                        3: "Video decoding failed - codec may not be supported",
+                        4: "Video format not supported",
+                      };
+                      setVideoError(messages[error.code] || "Failed to load video");
+                    } else {
+                      setVideoError("Failed to load video");
+                    }
+                  }}
+                >
+                  Your browser does not support video playback.
+                </video>
+              </div>
+            )}
+
+            {isVideo && videoError && (
+              <div className="mb-4 py-8 text-center text-muted-foreground text-sm">
+                {videoError}
+              </div>
+            )}
+
+            {!isImage && !isText && !isVideo && (
               <div className="mb-4 py-8 text-center text-muted-foreground text-sm">
                 Preview not available
               </div>

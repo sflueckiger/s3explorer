@@ -1,17 +1,17 @@
 {
   "name": "@sflueckiger/s3explore",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A beautiful, secure S3 bucket explorer with encrypted credential storage",
   "keywords": ["s3", "aws", "bucket", "explorer", "browser", "minio", "cloudflare-r2"],
   "author": "Sebastian Flueckiger",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sflueckiger/s3explore.git"
+    "url": "https://github.com/sflueckiger/s3explorer.git"
   },
-  "homepage": "https://github.com/sflueckiger/s3explore",
+  "homepage": "https://github.com/sflueckiger/s3explorer",
   "bugs": {
-    "url": "https://github.com/sflueckiger/s3explore/issues"
+    "url": "https://github.com/sflueckiger/s3explorer/issues"
   },
   "bin": {
     "s3explore": "./bin/s3explore.ts"

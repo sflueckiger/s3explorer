@@ -18,6 +18,9 @@ const CONTENT_TYPES: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   svg: "image/svg+xml",
+  // Video
+  mp4: "video/mp4",
+  webm: "video/webm",
   // Text
   txt: "text/plain",
   json: "application/json",
@@ -78,6 +81,7 @@ const EXTENSION_FROM_CONTENT_TYPE: Record<string, string> = {
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 const TEXT_EXTENSIONS = ["txt", "json", "md", "yaml", "yml", "xml", "csv", "log"];
+const VIDEO_EXTENSIONS = ["mp4", "webm"];
 
 const MAX_IMAGE_PREVIEW_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_TEXT_PREVIEW_SIZE = 1 * 1024 * 1024; // 1MB
@@ -107,10 +111,10 @@ export const fileRoutes = new Elysia({ prefix: "/file" })
     }
     throw error;
   })
-  // Preview endpoint - with size limits
+  // Preview endpoint - with size limits and range support for video
   .get(
     "/:connId/*",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
       const connection = getConnection(params.connId);
       if (!connection) {
         set.status = 404;
@@ -130,10 +134,15 @@ export const fileRoutes = new Elysia({ prefix: "/file" })
         // Check if file exists and get size
         const stat = await file.stat();
         const ext = getExtension(path);
-        const isImage = IMAGE_EXTENSIONS.includes(ext);
-        const isText = TEXT_EXTENSIONS.includes(ext);
+        // Use actual content type from S3, fall back to extension-based
+        const contentType = stat.type || getContentType(path);
 
-        // Check size limits for preview
+        // Determine file type from extension or content-type
+        const isImage = IMAGE_EXTENSIONS.includes(ext) || contentType.startsWith("image/");
+        const isText = TEXT_EXTENSIONS.includes(ext) || contentType.startsWith("text/") || contentType === "application/json";
+        const isVideo = VIDEO_EXTENSIONS.includes(ext) || contentType.startsWith("video/");
+
+        // Check size limits for preview (not for video - it streams)
         if (isImage && stat.size > MAX_IMAGE_PREVIEW_SIZE) {
           set.status = 413;
           return {
@@ -152,18 +161,45 @@ export const fileRoutes = new Elysia({ prefix: "/file" })
           };
         }
 
-        // Stream the file
-        const stream = file.stream();
-        const contentType = getContentType(path);
+        // Handle Range requests for video streaming
+        const rangeHeader = request.headers.get("Range");
+        if (isVideo && rangeHeader) {
+          // Get presigned URL and proxy the range request
+          const presignedUrl = file.presign({ expiresIn: 3600 });
+          const s3Response = await fetch(presignedUrl, {
+            headers: { Range: rangeHeader },
+          });
 
-        set.headers["Content-Type"] = contentType;
-        set.headers["Content-Length"] = String(stat.size);
-        set.headers["Cache-Control"] = "private, max-age=300";
+          // Forward the S3 response with proper headers
+          return new Response(s3Response.body, {
+            status: s3Response.status,
+            headers: {
+              "Content-Type": contentType,
+              "Content-Length": s3Response.headers.get("Content-Length") || "",
+              "Content-Range": s3Response.headers.get("Content-Range") || "",
+              "Accept-Ranges": "bytes",
+            },
+          });
+        }
 
-        return new Response(stream, {
+        // For video without Range, still indicate Range support
+        if (isVideo) {
+          return new Response(file.stream(), {
+            headers: {
+              "Content-Type": contentType,
+              "Content-Length": String(stat.size),
+              "Accept-Ranges": "bytes",
+              "Cache-Control": "private, max-age=300",
+            },
+          });
+        }
+
+        // Stream the file (non-video)
+        return new Response(file.stream(), {
           headers: {
             "Content-Type": contentType,
             "Content-Length": String(stat.size),
+            "Cache-Control": "private, max-age=300",
           },
         });
       } catch (error) {
@@ -285,6 +321,21 @@ export const fileMetaRoutes = new Elysia({ prefix: "/file-meta" })
 
         const stat = await file.stat();
         const ext = getExtension(path);
+        const contentType = stat.type || getContentType(path);
+
+        // Determine preview type from extension first, then fall back to content-type
+        const getPreviewType = (): "image" | "text" | "video" | null => {
+          if (IMAGE_EXTENSIONS.includes(ext)) return "image";
+          if (TEXT_EXTENSIONS.includes(ext)) return "text";
+          if (VIDEO_EXTENSIONS.includes(ext)) return "video";
+          // Fall back to content-type detection for files without extensions
+          if (contentType.startsWith("image/")) return "image";
+          if (contentType.startsWith("text/") || contentType === "application/json") return "text";
+          if (contentType.startsWith("video/")) return "video";
+          return null;
+        };
+
+        const previewType = getPreviewType();
 
         return {
           success: true,
@@ -293,15 +344,10 @@ export const fileMetaRoutes = new Elysia({ prefix: "/file-meta" })
             name: getFilename(path),
             size: stat.size,
             lastModified: stat.lastModified,
-            contentType: stat.type || getContentType(path),
+            contentType,
             etag: stat.etag,
-            isPreviewable:
-              IMAGE_EXTENSIONS.includes(ext) || TEXT_EXTENSIONS.includes(ext),
-            previewType: IMAGE_EXTENSIONS.includes(ext)
-              ? "image"
-              : TEXT_EXTENSIONS.includes(ext)
-              ? "text"
-              : null,
+            isPreviewable: previewType !== null,
+            previewType,
           },
         };
       } catch (error) {

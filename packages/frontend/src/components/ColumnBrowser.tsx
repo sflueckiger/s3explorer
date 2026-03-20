@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
-import { Folder, File, FileText, FileImage, Loader2, AlertCircle, MoreHorizontal } from "lucide-react";
+import { Folder, File, FileText, FileImage, FileVideo, Loader2, AlertCircle, MoreHorizontal } from "lucide-react";
 import { PreviewPanel } from "./PreviewPanel";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +46,7 @@ interface ColumnBrowserProps {
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 const TEXT_EXTENSIONS = ["txt", "json", "md", "yaml", "yml", "xml", "csv", "log"];
+const VIDEO_EXTENSIONS = ["mp4", "webm"];
 
 function getExtension(name: string): string {
   const parts = name.split(".");
@@ -56,6 +57,9 @@ function getFileIcon(name: string) {
   const ext = getExtension(name);
   if (IMAGE_EXTENSIONS.includes(ext)) {
     return <FileImage className="h-4 w-4 text-blue-500" />;
+  }
+  if (VIDEO_EXTENSIONS.includes(ext)) {
+    return <FileVideo className="h-4 w-4 text-purple-500" />;
   }
   if (TEXT_EXTENSIONS.includes(ext)) {
     return <FileText className="h-4 w-4 text-amber-500" />;
